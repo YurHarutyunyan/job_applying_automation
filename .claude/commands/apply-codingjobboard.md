@@ -1,6 +1,6 @@
 ---
 description: Run codingjobboard-apply-agent to apply to staged CodingJobBoard leads via Simplify autofill
-argument-hint: [optional: a specific job id — otherwise processes every staged CodingJobBoard lead]
+argument-hint: [optional: a specific job id — otherwise processes up to 10 staged CodingJobBoard leads]
 ---
 
 Launch the `codingjobboard-apply-agent` subagent (defined in
@@ -16,6 +16,18 @@ search or filter jobs itself, and it doesn't tailor a CV (Simplify uses its own 
 
 $ARGUMENTS
 
-If a job id was given above, apply to just that one job. Otherwise, process every job in
-`found_jobs.json` whose id starts with `codingjobboard-` and doesn't already have a logged status
-in `applied_log.json`.
+Do **not** read `found_jobs.json` or `applied_log.json` yourself — `found_jobs.json` is hundreds
+of KB of job descriptions. Get the work list with:
+
+```
+python3 scripts/pending_jobs.py --ids-only
+```
+
+(capped at 10, already excludes logged jobs and anything not screened "passed").
+
+If a job id was given above, launch the agent once for just that job. Otherwise launch the agent
+**once per job id from that list, one after another** — a fresh agent per job, passing it the
+single job id — rather than one agent for the whole list. One long-lived agent would carry every
+previous job's page dumps in its context and re-send them on every call. After all jobs are done,
+combine the agents' reports into the two lists the agent describes (auto-applied, and
+`needs_manual_review` with reasons).

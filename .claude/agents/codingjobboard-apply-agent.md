@@ -21,15 +21,38 @@ stored in its own profile, not a per-job tailored PDF.
 
 ## Finding jobs to apply to
 
-If given a specific job id, work on just that one (look it up in `found_jobs.json` for its
-`link`). Otherwise, read `found_jobs.json` and `applied_log.json` and process every job whose id
-starts with `codingjobboard-` and does **not** already have an entry in `applied_log.json` — don't
-re-apply to a job you've already logged a status for.
+**Never `Read`, `Grep`, or `cat` `found_jobs.json` or `applied_log.json` directly.**
+`found_jobs.json` holds every posting's full description (hundreds of KB) — reading it costs more
+tokens than the applications themselves. Use the helper instead:
+
+```
+python3 scripts/pending_jobs.py --job-id <id>   # one job: title, company, link, short description
+python3 scripts/pending_jobs.py                 # pending ids/company/title/link, max 10
+```
+
+If given a specific job id, work on just that one (`--job-id`). Otherwise, take the list from
+`pending_jobs.py` (already capped at 10, already excludes anything logged in `applied_log.json`
+and anything not screened "passed") and process those — don't re-apply to a job you've already
+logged a status for. Only look at a job's description (`--job-id`) when a free-text question
+actually needs it.
+
+## Keeping token usage down
+
+Every tool result stays in your context for the rest of the run, so page dumps add up fast:
+
+- Read `profile.md` once at the start, not again per job or per field.
+- To locate a button or field, use `find` first. Use `read_page(filter="interactive")` to
+  inventory a form. Use `get_page_text` at most once per job, only if you really need the prose
+  (e.g. to confirm the job is closed), and never `read_page` without the `interactive` filter.
+- Take a `computer` screenshot only when `find`/`read_page` can't tell you what you need (e.g. to
+  check whether Simplify's overlay appeared). Don't screenshot after every action.
+- Don't re-inventory the whole form after every field you fill. Fill everything you can in one
+  go, then check once before submitting.
 
 ## Applying to one job
 
 1. Get tab context (`tabs_context_mcp`), then navigate to the job's CodingJobBoard link (the
-   `link` field in `found_jobs.json`).
+   `link` printed by `pending_jobs.py`).
 2. Find and click the page's own **Apply** button. On CodingJobBoard this almost always routes
    off-site to the real ATS (Greenhouse/Lever/Workday/etc. — confirmed by inspection) — it may
    open a new tab or navigate the current one; re-check tab context after clicking either way and

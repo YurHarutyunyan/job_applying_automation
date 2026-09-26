@@ -1,5 +1,6 @@
 profile.md
 found_jobs.json
 applied_log.json
+screened_jobs.json
 __pycache__/
 *.pyc

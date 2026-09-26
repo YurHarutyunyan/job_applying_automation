@@ -1,0 +1,33 @@
+# Contact
+Name:
+Email:
+Phone:
+Location:
+LinkedIn:
+Website/GitHub:
+Work Authorization:
+
+# Summary
+One or two sentences describing who you are, your current role, and your main stack. This is used
+verbatim (or lightly quoted) to answer open-ended "tell us about yourself" fields Simplify leaves
+blank — write it the way you'd actually want a recruiter to read it.
+
+# Skills
+- List every skill, language, framework, and tool you'd want an application to mention.
+- One per line is fine — grouping into categories (Languages, Backend, DevOps, etc.) like below
+  is optional but makes it easier for you to scan later.
+
+# Experience
+## Job Title, Company (Month Year – Month Year or "Present")
+- What you actually did, one bullet per line.
+- Be concrete — these get quoted directly into free-text answers, so only put things here you can
+  stand behind in an interview.
+
+## Previous Job Title, Previous Company (Month Year – Month Year)
+- ...
+
+# Education
+- Degree, Field — Institution (Year – Year)
+
+# Languages
+- Language — Fluency level

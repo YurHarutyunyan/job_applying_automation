@@ -106,13 +106,37 @@ Summary: 6 new, 1 updated, 120 unchanged, 16 already logged, 3 excluded (citizen
 found_jobs.json updated (147 total leads).
 ```
 
+**If that leaves zero new/updated leads** (e.g. every posting this run came back "ambiguous" or
+"excluded"), there's a one-time fallback: any *java* posting that came back "ambiguous" specifically
+(not "excluded" — those have an explicit disqualifying requirement, re-asking won't change that)
+gets re-screened once more with a stricter, decisive prompt — no more "ambiguous," it only accepts
+postings explicitly open to work from anywhere with no location/citizenship restriction at all.
+This never runs on a normal run that already found something; it only exists so a run doesn't end
+completely empty-handed. Expect a block like this appended when it triggers:
+
+```
+No leads passed the normal run — re-screening 4 java posting(s) that came back ambiguous, with a decisive fully-remote-only bar:
+java fallback, passed: Acme Corp — Java Backend Engineer — explicitly states "remote, work from anywhere, no location restriction"
+java fallback, still excluded: Globex — Java Developer — location tag suggests EU-only, no explicit remote-anywhere statement
+Java fallback summary: 1 passed out of 4
+```
+
+**Each run stops after 10 new/updated leads** (override with `--limit N`). To keep token use low,
+every Claude verdict — including rejected ones — is cached in `screened_jobs.json` and reused until
+that posting's text changes. Postings with an unambiguous disqualifier ("must be a US citizen",
+security clearance, "W-2 only") are excluded without calling Claude at all. The Claude call itself
+only sends your "Work Authorization" line, not the whole profile, and uses a small model
+(`SCREEN_MODEL` env var, default `haiku`). The last line of output reports how many calls were
+made.
+
 This step requires `profile.md` to exist (see [Setup](#setup)) — it exits with an error before
 touching the browser if it's missing, since it can't screen citizenship without your "Work
 Authorization" line. It also requires the `claude` CLI on PATH and authenticated, same as any
 other headless `claude -p` call in this repo.
 
-Run with `--dry-run` first if you just want to see what it *would* add without writing anything
-(the citizenship screening calls still run under `--dry-run`, so the preview is accurate):
+Run with `--dry-run` first if you just want to see what it *would* add without writing to
+`found_jobs.json` (the citizenship screening calls still run under `--dry-run`, so the preview is
+accurate, and their verdicts are cached so the real run doesn't pay for them again):
 ```bash
 python3 scripts/fetch_jobs.py --dry-run
 ```
@@ -123,16 +147,12 @@ Nothing here applies to a job or opens a tab you'd need to review — this step 
 ### 3. (Optional) Skim what got staged
 
 ```bash
-python3 -c "
-import json
-jobs = json.load(open('found_jobs.json'))
-log = json.load(open('applied_log.json'))
-pending = [j for j in jobs if j['id'] not in log]
-for j in pending:
-    print(j['id'], '-', j['companyName'], '-', j['title'])
-print(f'{len(pending)} pending')
-"
+python3 scripts/pending_jobs.py            # the next 10 the apply step will work on
+python3 scripts/pending_jobs.py --limit 1000
 ```
+
+Only leads screened "passed" and not yet in `applied_log.json` are listed. The apply agent uses
+this same script instead of reading `found_jobs.json`, which is too big to put in its context.
 
 This is just a sanity check — the apply agent does its own filtering, you don't have to prune
 anything by hand. Skip this step entirely if you trust the fetcher's stack-keyword filter.
@@ -145,7 +165,8 @@ From inside Claude Code, in this directory:
 /apply-codingjobboard
 ```
 
-This launches `codingjobboard-apply-agent`, which processes every pending job one at a time:
+This launches `codingjobboard-apply-agent` once per pending job (up to 10, each in a fresh agent
+so earlier jobs' page dumps don't pile up in context). For each job it:
 navigates to it, follows its Apply button off-site, triggers Simplify, fills any gaps from
 `profile.md`, and either submits (logging `applied`) or stops and logs `needs_manual_review` with
 a tab left open for you. **Re-read the warning at the top of this file before your first run** —
@@ -249,6 +270,7 @@ profile.md.example          # copy to profile.md and fill in your own facts
 scripts/
   common.py                  # shared load/save/record helpers for found_jobs.json + applied_log.json
   fetch_jobs.py               # scrapes CodingJobBoard's remote listings into found_jobs.json
+  pending_jobs.py             # compact list of leads still to apply to (what the agent reads)
   log_apply.py                # records one job's outcome into applied_log.json
 .claude/
   agents/codingjobboard-apply-agent.md   # the agent that actually drives the browser and applies
