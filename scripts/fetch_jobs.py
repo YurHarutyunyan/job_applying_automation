@@ -23,8 +23,8 @@ instead of an Obsidian vault's staging notes — this package has no vault.
   4. Requires a stack keyword to appear in the posting's own title/location/descriptionText (the
      /jobs-in/remote listing is already remote-scoped, so no separate remote-keyword check).
   5. Screens each stack-matching posting's citizenship/work-authorization requirement against
-     profile.md's "Work Authorization" line via headless Claude (`claude -p`, same subprocess
-     pattern tailor_cv.py uses in the full pipeline). Only postings Claude judges "passed" get
+     profile.md's "Work Authorization" line via a headless LLM — `claude -p` or `cursor-agent -p`,
+     whichever backend is active (see scripts/backend.py). Only postings judged "passed" get
      saved — "excluded" and "ambiguous" postings are printed with the reason but never written to
      found_jobs.json, since this package's apply step submits with no human review and shouldn't
      see a job it hasn't cleared. A posting already saved with unchanged description text is never
@@ -39,13 +39,13 @@ instead of an Obsidian vault's staging notes — this package has no vault.
   7. Stops as soon as --limit (default 10) new/updated leads have been saved this run, so a run
      never screens more postings than it needs.
 
-Token budget: every Claude verdict (including "excluded"/"ambiguous" ones, which never reach
+Token budget: every LLM verdict (including "excluded"/"ambiguous" ones, which never reach
 found_jobs.json) is cached in screened_jobs.json keyed by job id + a hash of the posting text, so a
 rejected posting is never paid for twice. Postings that trip an unambiguous hard-exclusion pattern
-(e.g. "must be a US citizen", security clearance) are excluded without calling Claude at all. The
-Claude call itself sends only profile.md's "Work Authorization" line, runs on a small model
-(SCREEN_MODEL, default "haiku") with a minimal system prompt, and runs from a temp dir so no
-CLAUDE.md gets auto-loaded into every call.
+(e.g. "must be a US citizen", security clearance) are excluded without an LLM call at all. The
+call itself sends only profile.md's "Work Authorization" line with a minimal system prompt, from a
+temp dir so no CLAUDE.md/rules get auto-loaded. Models: SCREEN_MODEL (claude backend, default
+"haiku") or CURSOR_SCREEN_MODEL (cursor backend, default: the account's default model).
 
 A job already logged with ANY status in applied_log.json is skipped outright — it's already been
 handled. A job already present in found_jobs.json is updated in place if its description text
@@ -64,13 +64,13 @@ import hashlib
 import json
 import os
 import re
-import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from common import load_jobs, save_jobs, load_log  # noqa: E402
+import backend  # noqa: E402
+from backend import call_llm  # noqa: E402
 
 CHROME_PATH = "/usr/bin/google-chrome"
 LISTING_URL = "https://www.codingjobboard.com/jobs-in/remote"
@@ -79,12 +79,12 @@ DEFAULT_LIMIT = 10
 ROOT = Path(__file__).resolve().parent.parent
 PROFILE_FILE = ROOT / "profile.md"
 SCREEN_CACHE_FILE = ROOT / "screened_jobs.json"
-SCREEN_MODEL = os.environ.get("SCREEN_MODEL", "haiku")
 DESCRIPTION_CHARS = 4000
+JSON_OBJECT_RE = re.compile(r"\{[^{}]*\}")
 SCREEN_SYSTEM_PROMPT = "You classify job postings. Reply with only the requested single-line JSON object."
 WORK_AUTH_RE = re.compile(r"^\s*Work Authorization:\s*(.+)$", re.I | re.M)
 
-# Unambiguous disqualifiers for this candidate — excluded without spending a Claude call.
+# Unambiguous disqualifiers for this candidate — excluded without spending an LLM call.
 HARD_EXCLUDE_RE = re.compile(
     r"\b(must be an? (u\.?s\.?|united states) citizen"
     r"|(u\.?s\.?|united states) citizens?(hip)?( is)? (required|only)"
@@ -177,32 +177,6 @@ def read_work_authorization() -> str:
     return m.group(1).strip()
 
 
-def call_claude(prompt: str) -> str:
-    # Runs from a temp dir so Claude Code doesn't auto-discover a CLAUDE.md up this repo's
-    # parent chain and prepend it to every single screening call.
-    result = subprocess.run(
-        [
-            "claude", "-p",
-            "--model", SCREEN_MODEL,
-            "--system-prompt", SCREEN_SYSTEM_PROMPT,
-            "--tools", "",
-            "--no-session-persistence",
-            "--strict-mcp-config",
-        ],
-        input=prompt,
-        capture_output=True,
-        text=True,
-        timeout=60,
-        cwd=tempfile.gettempdir(),
-    )
-    if result.returncode != 0:
-        raise RuntimeError(f"claude -p failed (exit {result.returncode}): {result.stderr.strip()}")
-    output = result.stdout.strip()
-    if not output:
-        raise RuntimeError(f"claude -p returned empty output. stderr: {result.stderr.strip()}")
-    return output
-
-
 def ask_verdict(template: str, work_authorization: str, job: dict, allowed: tuple) -> dict:
     prompt = template.format(
         work_authorization=work_authorization,
@@ -211,9 +185,11 @@ def ask_verdict(template: str, work_authorization: str, job: dict, allowed: tupl
         location=job["location"],
         description=job["descriptionText"][:DESCRIPTION_CHARS],
     )
-    raw = call_claude(prompt)
-    raw = re.sub(r"^```(?:json)?|```$", "", raw.strip(), flags=re.M).strip()
-    verdict = json.loads(raw)
+    raw = call_llm(prompt, SCREEN_SYSTEM_PROMPT)
+    m = JSON_OBJECT_RE.search(raw)
+    if not m:
+        raise ValueError(f"no JSON object in reply: {raw[:200]!r}")
+    verdict = json.loads(m.group(0))
     if verdict.get("status") not in allowed:
         raise ValueError(f"unexpected status: {verdict.get('status')!r}")
     return {"status": verdict["status"], "reason": verdict.get("reason", "")}
@@ -321,7 +297,13 @@ def main():
                         help="Show what would happen; write nothing to found_jobs.json")
     parser.add_argument("--limit", type=int, default=DEFAULT_LIMIT,
                         help=f"Stop once this many new/updated leads are saved (default {DEFAULT_LIMIT})")
+    parser.add_argument("--backend", choices=backend.BACKENDS,
+                        help="Screening engine for this run (default: ./autoapply.sh backend setting)")
     args = parser.parse_args()
+    if args.backend:
+        os.environ["AUTOAPPLY_BACKEND"] = args.backend
+    active_backend = backend.get_backend()
+    print(f"Screening backend: {active_backend} ({backend.model_label(active_backend)})")
 
     from playwright.sync_api import sync_playwright
 
@@ -333,13 +315,13 @@ def main():
 
     new_count = updated_count = unchanged_count = already_logged_count = 0
     excluded_count = ambiguous_count = stack_match_count = 0
-    claude_calls = cached_hits = prefiltered = 0
+    llm_calls = cached_hits = prefiltered = 0
     java_ambiguous_candidates = []
     limit_reached = False
 
     def cached_or_screen(job: dict, verdict_key: str, screen_fn) -> tuple[dict, bool]:
         """Returns (verdict, came_from_cache), caching any fresh, cacheable verdict."""
-        nonlocal claude_calls, prefiltered
+        nonlocal llm_calls, prefiltered
         h = posting_hash(job)
         entry = cache.get(job["id"])
         if entry and entry.get("hash") == h and verdict_key in entry:
@@ -352,7 +334,7 @@ def main():
             prefiltered += 1
         else:
             verdict, cacheable = screen_fn(work_authorization, job)
-            claude_calls += 1
+            llm_calls += 1
         if cacheable:
             entry[verdict_key] = verdict
             cache[job["id"]] = entry
@@ -487,7 +469,7 @@ def main():
         print(f"Java fallback summary: {fallback_new_count} passed out of {len(java_ambiguous_candidates)}")
 
     print(
-        f"Screening cost: {claude_calls} Claude call(s) ({SCREEN_MODEL}), "
+        f"Screening cost: {llm_calls} {active_backend} call(s) ({backend.model_label(active_backend)}), "
         f"{cached_hits} cached verdict(s) reused, {prefiltered} hard-excluded without a call."
     )
 

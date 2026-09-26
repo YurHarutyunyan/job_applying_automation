@@ -4,3 +4,5 @@ applied_log.json
 screened_jobs.json
 __pycache__/
 *.pyc
+.backend
+.browser_profile/

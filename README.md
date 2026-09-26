@@ -46,6 +46,70 @@ to a submit — that job's browser tab is left open for you to finish by hand.
    (only needed for the lead-fetching step, `scripts/fetch_jobs.py` — the apply step itself has
    no Python browser dependency, it drives Chrome through Claude Code's own browser tools.)
 
+## Choosing an engine: `claude` or `cursor`
+
+Everything can be run through `./autoapply.sh`, which switches between two engines:
+
+| | `claude` (default) | `cursor` |
+|---|---|---|
+| Fetch screening | `claude -p` | `cursor-agent -p` (Cursor subscription) |
+| Apply | Claude Code agent + Claude in Chrome | `scripts/apply_playwright.py`: Playwright + Chrome + Simplify |
+| Who clicks Submit | the agent, no confirmation | **you**, then you tell the script what happened |
+
+```bash
+./autoapply.sh backend cursor     # switch (saved in .backend); `backend claude` to switch back
+./autoapply.sh fetch              # step 2 below, using the active engine
+./autoapply.sh pending            # step 3
+./autoapply.sh apply [job-id]     # step 4, using the active engine
+AUTOAPPLY_BACKEND=claude ./autoapply.sh fetch   # one-off override
+```
+
+### How the switch works
+
+- **Which engine is active.** `scripts/backend.py` decides by checking three places in order, and
+  the first one that's set wins:
+  1. The `AUTOAPPLY_BACKEND` environment variable.
+  2. The `.backend` file at the repo root, one word, written by `./autoapply.sh backend <name>`.
+     It's gitignored.
+  3. The default, `claude`.
+
+  Any other value stops the run with an error.
+- **Fetch.** `fetch_jobs.py` hands every screening question to `backend.call_llm()`. That
+  function runs one of two commands:
+  - On `claude`: `claude -p --model $SCREEN_MODEL` (default `haiku`) with no tools and no saved
+    session.
+  - On `cursor`: `cursor-agent -p --mode ask` (read-only), using `$CURSOR_SCREEN_MODEL` if set.
+
+  Both run from a temp directory, so neither CLI loads this repo's `CLAUDE.md` or rules into
+  every call. Everything else is the same on both engines: the prompt, the verdict cache in
+  `screened_jobs.json`, and the output files. `--backend` on `fetch_jobs.py` overrides the engine
+  for one run.
+- **Apply.** `autoapply.sh apply` reads the active engine:
+  - On `cursor`: it runs `scripts/apply_playwright.py`. Chrome opens with Simplify, the form is
+    autofilled, your CV is attached, and you click Submit yourself.
+  - On `claude`: it runs `claude -p "/apply-codingjobboard"` with the Claude in Chrome
+    extension, and the agent submits without asking.
+- **What stays the same.** Both engines share `profile.md`, `found_jobs.json`,
+  `applied_log.json` and the pending list (`scripts/pending_jobs.py`). You can switch at any
+  point, and jobs already logged won't be applied to twice.
+
+One-time setup for the `cursor` engine:
+
+```bash
+curl https://cursor.com/install -fsS | bash   # installs cursor-agent into ~/.local/bin
+cursor-agent login
+./autoapply.sh setup-browser                  # opens Chrome on a dedicated profile (.browser_profile/):
+                                              # add Simplify, sign in, close the window
+```
+
+With `cursor`, the apply step opens the job, follows Apply to the ATS, clicks Simplify's "Autofill
+This Page", attaches your CV to the resume field, lists required fields that are still empty,
+and waits. The CV is `~/Downloads/Yuri’s CV.pdf` by default (override with `--cv <path>` or
+`AUTOAPPLY_CV`), and it's always uploaded as `Yuri's CV.pdf`. You finish and submit in the
+browser, then answer `y` (submitted), `n` (needs manual review), `c` (closed) or `s` (skip). That
+answer is logged to `applied_log.json`. `CURSOR_SCREEN_MODEL` picks the screening model (see
+`cursor-agent models`); unset means your account's default.
+
 ## Setup
 
 ```bash
@@ -267,7 +331,10 @@ re-touched by `fetch_jobs.py`. If you want another attempt at it, delete its ent
 
 ```
 profile.md.example          # copy to profile.md and fill in your own facts
+autoapply.sh                # single entry point + claude/cursor engine switch
 scripts/
+  backend.py                 # active engine (claude|cursor) + the headless LLM call for screening
+  apply_playwright.py        # cursor engine's apply step (Playwright + Simplify, you submit)
   common.py                  # shared load/save/record helpers for found_jobs.json + applied_log.json
   fetch_jobs.py               # scrapes CodingJobBoard's remote listings into found_jobs.json
   pending_jobs.py             # compact list of leads still to apply to (what the agent reads)
