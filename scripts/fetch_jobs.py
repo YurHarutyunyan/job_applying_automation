@@ -21,7 +21,10 @@ instead of an Obsidian vault's staging notes — this package has no vault.
      (format: "<title> at <company> in <location>") and the body description text, bounded
      between the job-meta header block and the "APPLY" button.
   4. Requires a stack keyword to appear in the posting's own title/location/descriptionText (the
-     /jobs-in/remote listing is already remote-scoped, so no separate remote-keyword check).
+     /jobs-in/remote listing is already remote-scoped, so no separate remote-keyword check), and
+     — unless --any-stack — requires a Java role (common.is_java_role: Java/Spring mentioned, and
+     the title doesn't name another primary stack like Go/Python/Node/React). The candidate only
+     knows Java.
   5. Screens each stack-matching posting's citizenship/work-authorization requirement against
      profile.md's "Work Authorization" line via a headless LLM — `claude -p` or `cursor-agent -p`,
      whichever backend is active (see scripts/backend.py). Only postings judged "passed" get
@@ -38,6 +41,9 @@ instead of an Obsidian vault's staging notes — this package has no vault.
      a run that already found something; it's a safety net against ending completely empty-handed.
   7. Stops as soon as --limit (default 10) new/updated leads have been saved this run, so a run
      never screens more postings than it needs.
+  8. Freshness: each detail page's header carries the posted date (MM/DD/YYYY). Postings older
+     than --max-age-days (default 30; 0 disables) are skipped before any screening, and the date
+     is saved as "postedAt". A posting whose date can't be read is kept, with a note printed.
 
 Token budget: every LLM verdict (including "excluded"/"ambiguous" ones, which never reach
 found_jobs.json) is cached in screened_jobs.json keyed by job id + a hash of the posting text, so a
@@ -55,6 +61,7 @@ citizenship screen, or the java-only fallback screen, above).
 Usage:
     python3 scripts/fetch_jobs.py
     python3 scripts/fetch_jobs.py --limit 5   # stop after 5 new/updated leads
+    python3 scripts/fetch_jobs.py --max-age-days 14   # only postings from the last 2 weeks
     python3 scripts/fetch_jobs.py --dry-run   # show what would happen (citizenship screening
                                                # included), write nothing to found_jobs.json
                                                # (verdicts are still cached)
@@ -65,10 +72,11 @@ import json
 import os
 import re
 import sys
+from datetime import date
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from common import load_jobs, save_jobs, load_log  # noqa: E402
+from common import DEFAULT_MAX_AGE_DAYS, is_java_role, load_jobs, save_jobs, load_log, posting_age_days  # noqa: E402
 import backend  # noqa: E402
 from backend import call_llm  # noqa: E402
 
@@ -241,6 +249,19 @@ JAVA_ONLY_RE = re.compile(r"\bjava\b", re.I)
 JOB_LINK_ID_RE = re.compile(r"/job/[^/]+/(\d+)")
 TITLE_TAG_RE = re.compile(r"^(.*?) at (.*?) in (.*)$")
 DESCRIPTION_END_RE = re.compile(r"^(APPLY)$")
+POSTED_DATE_RE = re.compile(r"^\s*(\d{2})/(\d{2})/(\d{4})\s*$")
+
+
+def extract_posted_date(body_text: str) -> str | None:
+    """First standalone MM/DD/YYYY line in the job-meta header, as an ISO date."""
+    for line in body_text.split("\n")[:80]:
+        m = POSTED_DATE_RE.match(line)
+        if m:
+            try:
+                return date(int(m.group(3)), int(m.group(1)), int(m.group(2))).isoformat()
+            except ValueError:
+                return None
+    return None
 
 
 def list_remote_results(page) -> list[dict]:
@@ -288,7 +309,8 @@ def fetch_detail(page, url: str) -> dict | None:
 
     body_text = page.inner_text("body")
     description = extract_description(body_text)
-    return {"title": title, "company": company, "location": location, "descriptionText": description}
+    return {"title": title, "company": company, "location": location, "descriptionText": description,
+            "postedAt": extract_posted_date(body_text)}
 
 
 def main():
@@ -299,6 +321,10 @@ def main():
                         help=f"Stop once this many new/updated leads are saved (default {DEFAULT_LIMIT})")
     parser.add_argument("--backend", choices=backend.BACKENDS,
                         help="Screening engine for this run (default: ./autoapply.sh backend setting)")
+    parser.add_argument("--max-age-days", type=int, default=DEFAULT_MAX_AGE_DAYS,
+                        help=f"Skip postings older than this (default {DEFAULT_MAX_AGE_DAYS}; 0 = no limit)")
+    parser.add_argument("--any-stack", action="store_true",
+                        help="Keep non-Java roles too (by default only Java/Spring roles are kept)")
     args = parser.parse_args()
     if args.backend:
         os.environ["AUTOAPPLY_BACKEND"] = args.backend
@@ -314,7 +340,7 @@ def main():
     cache = load_screen_cache()
 
     new_count = updated_count = unchanged_count = already_logged_count = 0
-    excluded_count = ambiguous_count = stack_match_count = 0
+    excluded_count = ambiguous_count = stack_match_count = stale_count = 0
     llm_calls = cached_hits = prefiltered = 0
     java_ambiguous_candidates = []
     limit_reached = False
@@ -384,8 +410,19 @@ def main():
             if not detail:
                 continue
 
+            age = posting_age_days(detail)
+            if age is None:
+                print(f"no posted date found, keeping: {detail['title']} ({jid})")
+            elif args.max_age_days and age > args.max_age_days:
+                stale_count += 1
+                print(f"too old ({age} days), skipping: {detail['company']} — {detail['title']}")
+                continue
+
             haystack = f"{detail['title']} {detail['location']} {detail['descriptionText']}"
             if not STACK_RE.search(haystack):
+                continue
+            if not args.any_stack and not is_java_role(detail):
+                print(f"not a Java role, skipping: {detail['company']} — {detail['title']}")
                 continue
             stack_match_count += 1
 
@@ -395,6 +432,7 @@ def main():
                 "companyName": detail["company"],
                 "location": detail["location"],
                 "descriptionText": detail["descriptionText"],
+                "postedAt": detail["postedAt"],
                 "descriptionHtml": "",
                 "link": c["href"],
                 "applyUrl": "",
@@ -441,6 +479,7 @@ def main():
     print(
         f"\nSummary: {new_count} new, {updated_count} updated, "
         f"{unchanged_count} unchanged, {already_logged_count} already logged, "
+        f"{stale_count} older than {args.max_age_days} days, "
         f"{excluded_count} excluded (citizenship), {ambiguous_count} ambiguous (excluded conservatively), "
         f"{stack_match_count} matched stack"
     )

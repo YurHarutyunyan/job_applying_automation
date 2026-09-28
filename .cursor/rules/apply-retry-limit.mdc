@@ -1,0 +1,12 @@
+---
+description: Limit on submit attempts when applying to a job
+alwaysApply: true
+---
+
+When submitting a job application (any ATS, any tool), make at most 3 submit attempts per job.
+
+- An attempt is one click of the final Submit/Apply button.
+- Entering an emailed security code in the same still-open form is part of that attempt, not a new one.
+- If the third attempt doesn't reach a confirmation page, stop and log the job as
+  `needs_manual_review` with the reason. Don't try a fourth time, even if a fix looks obvious.
+- Never try to get around a CAPTCHA to make an attempt succeed.

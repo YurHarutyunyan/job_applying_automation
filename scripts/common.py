@@ -6,12 +6,62 @@ needs: no Obsidian vault, no LinkedIn/Playwright apply logic, no CV tailoring (t
 on Simplify's own stored resume, never a per-job tailored CV).
 """
 import json
-from datetime import datetime, timezone
+import re
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 JOBS_FILE = ROOT / "found_jobs.json"
 LOG_FILE = ROOT / "applied_log.json"
+DEFAULT_MAX_AGE_DAYS = 30
+_DATE_LINE_RE = re.compile(r"^\s*(\d{2})/(\d{2})/(\d{4})\s*$", re.M)
+# \bjava\b does not match "JavaScript"; bare "spring" is too often the season.
+_JAVA_RE = re.compile(r"\bjava\b|\bspring (boot|framework|cloud)\b", re.I)
+_OTHER_LANG_RE = re.compile(
+    r"\b(go|golang|python|php|ruby|node\.?js|typescript|c#|\.net|rust|elixir|scala)\b|c\+\+", re.I
+)
+_OTHER_STACK_TITLE_RE = re.compile(
+    r"\b(go|golang|python|django|php|laravel|ruby|rails|node\.?js|\.net|c#|rust|elixir|"
+    r"react|frontend|front-end|ios|android|flutter|data engineer|devops|sre|gtm|sales|marketing)\b|c\+\+",
+    re.I,
+)
+
+
+def is_java_role(job: dict) -> bool:
+    """The candidate only knows Java. A title naming Java qualifies; a title naming another
+    stack doesn't; a neutral title ("Backend Engineer") needs Java to be the posting's main
+    language — mentioned at least as often as all other languages combined, so an
+    "or Python/Java/Node" alternatives list doesn't count."""
+    title = job.get("title") or ""
+    if _JAVA_RE.search(title):
+        return True
+    if _OTHER_STACK_TITLE_RE.search(title):
+        return False
+    desc = job.get("descriptionText") or ""
+    java = len(_JAVA_RE.findall(desc))
+    return java > 0 and java >= len(_OTHER_LANG_RE.findall(desc))
+
+
+def posting_age_days(job: dict) -> int | None:
+    """Days since the posting went up, or None if unknown.
+
+    Uses "postedAt" (ISO date, set by fetch_jobs.py); leads saved before that field existed fall
+    back to the MM/DD/YYYY header line that is often captured at the top of descriptionText.
+    """
+    posted = None
+    if job.get("postedAt"):
+        try:
+            posted = date.fromisoformat(job["postedAt"])
+        except ValueError:
+            pass
+    if posted is None:
+        m = _DATE_LINE_RE.search((job.get("descriptionText") or "")[:1500])
+        if m:
+            try:
+                posted = date(int(m.group(3)), int(m.group(1)), int(m.group(2)))
+            except ValueError:
+                pass
+    return (date.today() - posted).days if posted else None
 
 
 def load_jobs(jobs_file: Path = JOBS_FILE) -> list:

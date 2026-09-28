@@ -1,0 +1,14 @@
+---
+description: Only apply to Java roles
+alwaysApply: true
+---
+
+When finding or applying to jobs, only pick Java roles: Java (or Spring Boot) is the main language
+of the role. The candidate knows Java and JavaScript but wants Java roles only.
+
+- Skip roles whose main language is something else (Go, TypeScript/JavaScript, Python, Node, PHP,
+  and so on), even if Java appears as one option in a list.
+- Never claim Go experience in an application. At WeMove the candidate works only on the Java side
+  of the monolith migration.
+- `common.is_java_role()` implements this check for staged leads; `scripts/pending_jobs.py` and
+  `scripts/fetch_jobs.py` apply it by default.

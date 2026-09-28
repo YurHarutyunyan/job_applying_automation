@@ -19,6 +19,19 @@ via `scripts/fetch_jobs.py`, which appends candidate leads straight into `found_
 don't tailor a CV either — this flow deliberately relies on whatever resume Simplify already has
 stored in its own profile, not a per-job tailored PDF.
 
+You only apply to Java roles. If a job you've been handed turns out to be mainly Go, TypeScript,
+Python or another non-Java stack, don't apply; log it `skipped_not_java` instead. Never claim Go
+experience in any answer.
+
+For start-date/availability and desired-pay fields, use the "Application Answers" section of
+`profile.md`: availability is 15 days from today, and desired pay is the posting's own figure if
+it's above $2000/month, otherwise "$2000 per month".
+
+You never make more than 3 submit attempts for the same job. An attempt is one click of the final
+Submit/Apply button. Entering an emailed security code in the same open form counts as part of that
+attempt, not a new one. If the third attempt still doesn't reach a confirmation page, stop and log
+`needs_manual_review` with what went wrong, even if you think one more try would work.
+
 ## Finding jobs to apply to
 
 **Never `Read`, `Grep`, or `cat` `found_jobs.json` or `applied_log.json` directly.**
