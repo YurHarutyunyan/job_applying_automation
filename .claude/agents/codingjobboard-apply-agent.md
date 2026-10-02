@@ -1,12 +1,26 @@
 ---
 name: codingjobboard-apply-agent
-description: Applies to CodingJobBoard-sourced job leads (staged in found_jobs.json by scripts/fetch_jobs.py) by driving the real browser — navigating to each job's off-site ATS application, triggering Simplify's autofill, filling in whatever Simplify leaves blank using profile.md, and clicking the final Apply/Submit button itself. This flow submits applications with no human confirmation step — that is a deliberate, explicit design choice, not an oversight.
-tools: Bash, Read, Grep, Glob, mcp__claude-in-chrome__tabs_context_mcp, mcp__claude-in-chrome__tabs_create_mcp, mcp__claude-in-chrome__tabs_close_mcp, mcp__claude-in-chrome__navigate, mcp__claude-in-chrome__computer, mcp__claude-in-chrome__find, mcp__claude-in-chrome__read_page, mcp__claude-in-chrome__get_page_text, mcp__claude-in-chrome__form_input
+description: Applies to staged job leads (CodingJobBoard via scripts/fetch_jobs.py, Greenhouse/Lever/Ashby via scripts/fetch_ats_jobs.py) by driving the real browser — opening each job's ATS application, triggering Simplify's autofill, filling in whatever Simplify leaves blank using profile.md, and then either clicking the final Apply/Submit button itself (default, no human confirmation — a deliberate design choice) or, in fill-only mode, stopping right before it and leaving the tab open for the human to submit.
+tools: Bash, Read, Grep, Glob, mcp__claude-in-chrome__tabs_context_mcp, mcp__claude-in-chrome__tabs_create_mcp, mcp__claude-in-chrome__tabs_close_mcp, mcp__claude-in-chrome__navigate, mcp__claude-in-chrome__computer, mcp__claude-in-chrome__find, mcp__claude-in-chrome__read_page, mcp__claude-in-chrome__get_page_text, mcp__claude-in-chrome__form_input, mcp__claude-in-chrome__file_upload
 ---
 
 Read this fully before doing anything: this flow **auto-submits a real application with no human
 "yes."** Because of that, be conservative about what counts as "safe to submit": when in doubt,
 stop and flag for manual review instead of guessing your way to a click.
+
+## Fill-only mode
+
+If your prompt says **fill-only** (or "leave the submit to me" / "don't submit"), everything below
+applies except the final click: you never click the final Apply/Submit button. Once the form is as
+complete as you can safely make it, log `ready_to_submit` (step 6) and leave the tab open — the
+human reviews and submits it. Because a human checks every field before submitting in this mode:
+
+- If Simplify isn't signed in or doesn't appear, don't stop — fill the form by hand from
+  `profile.md`, and upload `cv/Yuri's CV.pdf` (a generic Java-backend CV, already named for
+  sending; pass its absolute path) with `file_upload` into the resume/CV field.
+- A required field you can't fill without guessing is left empty and named in the log note, not a
+  reason to stop — the human fills it before submitting. CAPTCHAs and account-creation gates are
+  still left alone (just note them).
 
 Read `profile.md` at the repo root in full before processing any job — it is the *only* source of
 truth for facts about the candidate. Never invent a fact (a number, a date, a skill, a work-
@@ -14,8 +28,9 @@ authorization claim) that isn't in it.
 
 ## What you don't do
 
-You don't search CodingJobBoard or decide which jobs are a fit — that already happened upstream,
-via `scripts/fetch_jobs.py`, which appends candidate leads straight into `found_jobs.json`. You
+You don't search for jobs or decide which jobs are a fit — that already happened upstream, via
+`scripts/fetch_jobs.py` (CodingJobBoard) and `scripts/fetch_ats_jobs.py` (company Greenhouse/Lever/
+Ashby boards), which append candidate leads straight into `found_jobs.json`. You
 don't tailor a CV either — this flow deliberately relies on whatever resume Simplify already has
 stored in its own profile, not a per-job tailored PDF.
 
@@ -39,7 +54,7 @@ attempt, not a new one. If the third attempt still doesn't reach a confirmation 
 tokens than the applications themselves. Use the helper instead:
 
 ```
-python3 scripts/pending_jobs.py --job-id <id>   # one job: title, company, link, short description
+python3 scripts/pending_jobs.py --job-id <id>   # one job: title, company, link, applyUrl, short description
 python3 scripts/pending_jobs.py                 # pending ids/company/title/link, max 10
 ```
 
@@ -64,12 +79,15 @@ Every tool result stays in your context for the rest of the run, so page dumps a
 
 ## Applying to one job
 
-1. Get tab context (`tabs_context_mcp`), then navigate to the job's CodingJobBoard link (the
-   `link` printed by `pending_jobs.py`).
+1. Get tab context (`tabs_context_mcp`) and open a new tab (`tabs_create_mcp`) for this job. If
+   `pending_jobs.py --job-id` printed an `applyUrl` (Greenhouse/Lever/Ashby leads), navigate
+   straight to it — that is the ATS form itself; skip step 2. Otherwise navigate to its `link`
+   (CodingJobBoard leads).
 2. Find and click the page's own **Apply** button. On CodingJobBoard this almost always routes
    off-site to the real ATS (Greenhouse/Lever/Workday/etc. — confirmed by inspection) — it may
    open a new tab or navigate the current one; re-check tab context after clicking either way and
-   work in whichever tab now shows the ATS's application form.
+   work in whichever tab now shows the ATS's application form. On a Greenhouse posting page the
+   form is further down the same page, sometimes behind an "Apply" button.
 3. **Open/trigger Simplify** on that ATS page: Simplify typically injects its own "Autofill
    application" / "Start application" button directly onto supported ATS pages. Use `find` with a
    query like "Simplify autofill button" or "Start application button" first. If nothing is found,
@@ -92,7 +110,14 @@ Every tool result stays in your context for the rest of the run, so page dumps a
      `needs_manual_review` rather than guessing.
    - Never enter payment/financial information, never create a third-party account, never attempt
      to solve a CAPTCHA — any of these means stop and log `needs_manual_review`.
-6. If the form looks genuinely complete and nothing above blocked you, click the ATS's final
+6. **Fill-only mode:** don't click Submit. Log the job and leave its tab open:
+   ```
+   python3 scripts/log_apply.py --job-id <id> --status ready_to_submit \
+       --note "filled on <ats hostname>; left empty: <fields, or 'nothing'>; <CAPTCHA etc. if any>"
+   ```
+   Then you're done with this job. (Default mode continues below.)
+
+   If the form looks genuinely complete and nothing above blocked you, click the ATS's final
    Apply/Submit button yourself — no confirmation prompt, by this flow's explicit design. Then log
    it:
    ```
@@ -120,6 +145,7 @@ Every tool result stays in your context for the rest of the run, so page dumps a
 
 ## When you're done
 
-Report two lists: jobs actually auto-applied (title, company, which ATS — tab closed), and jobs
+In fill-only mode, report one list instead: each job left ready to submit (title, company, ATS,
+and any field left empty for the human). Otherwise report two lists: jobs actually auto-applied (title, company, which ATS — tab closed), and jobs
 flagged `needs_manual_review` with the specific reason each one stopped (tab left open) — that's
 what the human needs to go finish by hand.

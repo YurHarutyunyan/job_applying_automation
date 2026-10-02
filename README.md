@@ -208,6 +208,34 @@ python3 scripts/fetch_jobs.py --dry-run
 Nothing here applies to a job or opens a tab you'd need to review — this step only writes JSON
 (and makes read-only `claude -p` screening calls).
 
+#### Second source: company Greenhouse / Lever / Ashby boards
+
+```bash
+python3 scripts/fetch_ats_jobs.py            # --dry-run, --limit N, --max-age-days N as above
+```
+
+Polls the public JSON job boards of the companies listed in `ats_companies.json` (add a company by
+adding its board slug — the `<slug>` in `job-boards.greenhouse.io/<slug>`, `jobs.lever.co/<slug>`
+or `jobs.ashbyhq.com/<slug>`). No browser needed. It keeps remote, fresh, Java developer roles whose
+location isn't obviously locked to a country list without Armenia, then runs the same citizenship
+screen and verdict cache as `fetch_jobs.py`. Leads are saved with ids like
+`lever-binance-<posting id>` and an `applyUrl` that is the ATS form itself, so the apply agent
+goes straight to it.
+
+#### Third source: Himalayas
+
+```bash
+python3 scripts/fetch_himalayas_jobs.py      # --dry-run, --limit N, --query kotlin, --pages N
+```
+
+Searches [Himalayas](https://himalayas.app) for Java jobs open to candidates in Armenia. Himalayas'
+own Apply button requires a Himalayas account, so each posting is matched by title against the
+company's public Greenhouse/Lever/Ashby/Workable/Recruitee/SmartRecruiters/Breezy board and saved
+with that form as its `applyUrl`; unmatched postings are only printed. Himalayas' "worldwide" tag
+is not always right — check the form's own location questions before submitting.
+
+`./autoapply.sh fetch` runs all three fetchers.
+
 ### 3. (Optional) Skim what got staged
 
 ```bash
@@ -236,6 +264,14 @@ navigates to it, follows its Apply button off-site, triggers Simplify, fills any
 a tab left open for you. **Re-read the warning at the top of this file before your first run** —
 successful applications submit with no confirmation step.
 
+To have it fill every form but leave the final Submit click to you:
+```
+/apply-codingjobboard fill-only
+```
+Each job is logged `ready_to_submit` with its tab left open. If Simplify isn't signed in, the agent
+fills the form by hand from `profile.md` and uploads `cv/Yuri's CV.pdf` (a generic CV you put
+there; `cv/` is gitignored). After you submit a tab, log it as `applied` (step 5).
+
 To limit a run to one specific lead instead of everything pending:
 ```
 /apply-codingjobboard codingjobboard-14176
@@ -255,7 +291,8 @@ python3 scripts/log_apply.py --job-id codingjobboard-14176 --status applied --no
 ```
 
 Valid `--status` values: `applied`, `needs_manual_review`, `closed`, `skipped_no_cv`,
-`skipped_not_java`, `rejected` (the employer turned down a submitted application).
+`skipped_not_java`, `rejected` (the employer turned down a submitted application),
+`ready_to_submit` (fill-only mode: form filled, waiting for you to click Submit).
 
 ### 6. Repeat
 
@@ -332,12 +369,15 @@ re-touched by `fetch_jobs.py`. If you want another attempt at it, delete its ent
 
 ```
 profile.md.example          # copy to profile.md and fill in your own facts
+ats_companies.json          # which companies' Greenhouse/Lever/Ashby boards fetch_ats_jobs.py polls
 autoapply.sh                # single entry point + claude/cursor engine switch
 scripts/
   backend.py                 # active engine (claude|cursor) + the headless LLM call for screening
   apply_playwright.py        # cursor engine's apply step (Playwright + Simplify, you submit)
   common.py                  # shared load/save/record helpers for found_jobs.json + applied_log.json
   fetch_jobs.py               # scrapes CodingJobBoard's remote listings into found_jobs.json
+  fetch_ats_jobs.py           # pulls Greenhouse/Lever/Ashby boards from ats_companies.json
+  fetch_himalayas_jobs.py     # Himalayas Java jobs open to Armenia, resolved to company ATS forms
   pending_jobs.py             # compact list of leads still to apply to (what the agent reads)
   log_apply.py                # records one job's outcome into applied_log.json
 .claude/

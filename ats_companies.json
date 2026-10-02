@@ -1,0 +1,5 @@
+{
+  "greenhouse": ["neo4j", "jetbrains", "wrike", "elastic", "mongodb", "gitlab", "canonical", "mariadbplc"],
+  "lever": ["binance"],
+  "ashby": ["camunda", "confluent", "snowflake"]
+}

@@ -5,7 +5,7 @@
 #
 #   ./autoapply.sh backend              show the active backend
 #   ./autoapply.sh backend cursor       switch (saved in .backend)
-#   ./autoapply.sh fetch [--limit N] [--dry-run]
+#   ./autoapply.sh fetch [--limit N] [--dry-run]   CodingJobBoard, Greenhouse/Lever/Ashby, Himalayas
 #   ./autoapply.sh pending              list the next jobs to apply to
 #   ./autoapply.sh apply [job-id]       apply to one job (default: next pending)
 #   ./autoapply.sh setup-browser        cursor backend only: install + sign in to Simplify
@@ -25,6 +25,8 @@ case "$cmd" in
     ;;
   fetch)
     python3 scripts/fetch_jobs.py "$@"
+    python3 scripts/fetch_ats_jobs.py "$@"
+    python3 scripts/fetch_himalayas_jobs.py "$@"
     ;;
   pending)
     python3 scripts/pending_jobs.py "$@"

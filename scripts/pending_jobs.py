@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""Compact view of staged CodingJobBoard leads for the apply agent.
+"""Compact view of staged leads (CodingJobBoard, Greenhouse/Lever/Ashby, Himalayas) for the apply agent.
 
 found_jobs.json holds every posting's full description text (hundreds of KB), so the agent must
 never read it directly — that alone costs more tokens than applying to several jobs. This prints
 only what the agent needs.
 
-A lead is "pending" when its id starts with codingjobboard-, it has no entry in applied_log.json,
+A lead is "pending" when its id starts with one of SOURCE_PREFIXES, it has no entry in applied_log.json,
 its fitVerdict status is "passed" (leads screened "excluded"/"ambiguous" are never applied to), and
 it isn't older than --max-age-days (default 30; leads with no readable posted date are kept), and
 it is a Java role (see common.is_java_role; --any-stack disables this).
 
 Usage:
-    python3 scripts/pending_jobs.py                 # id<TAB>company<TAB>title<TAB>posted<TAB>link, max 10
+    python3 scripts/pending_jobs.py                 # id<TAB>company<TAB>title<TAB>posted<TAB>url, max 10
     python3 scripts/pending_jobs.py --limit 3
     python3 scripts/pending_jobs.py --max-age-days 0   # ignore posting age
     python3 scripts/pending_jobs.py --ids-only      # just ids, one per line
@@ -25,6 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from common import DEFAULT_MAX_AGE_DAYS, is_java_role, load_jobs, load_log, posting_age_days, select_job  # noqa: E402
 
 DEFAULT_LIMIT = 10
+SOURCE_PREFIXES = ("codingjobboard-", "greenhouse-", "lever-", "ashby-", "himalayas-")
 DESCRIPTION_CHARS = 2500
 
 
@@ -36,7 +37,7 @@ def fresh_enough(job: dict, max_age_days: int) -> bool:
 def pending(jobs: list, log: dict, max_age_days: int = DEFAULT_MAX_AGE_DAYS, java_only: bool = True) -> list:
     return [
         j for j in jobs
-        if j.get("id", "").startswith("codingjobboard-")
+        if j.get("id", "").startswith(SOURCE_PREFIXES)
         and j["id"] not in log
         and (j.get("fitVerdict") or {}).get("status") == "passed"
         and fresh_enough(j, max_age_days)
@@ -63,6 +64,8 @@ def main():
         age = posting_age_days(j)
         print(f"location: {j.get('location')}\nposted: {'unknown' if age is None else f'{age} days ago'}")
         print(f"link: {j.get('link')}")
+        if j.get("applyUrl"):
+            print(f"applyUrl: {j['applyUrl']}")
         desc = j.get("descriptionText") or ""
         suffix = " […truncated]" if len(desc) > DESCRIPTION_CHARS else ""
         print(f"description:\n{desc[:DESCRIPTION_CHARS]}{suffix}")
@@ -75,7 +78,7 @@ def main():
         else:
             age = posting_age_days(j)
             posted = "?" if age is None else f"{age}d"
-            print(f"{j['id']}\t{j.get('companyName')}\t{j.get('title')}\t{posted}\t{j.get('link')}")
+            print(f"{j['id']}\t{j.get('companyName')}\t{j.get('title')}\t{posted}\t{j.get('applyUrl') or j.get('link')}")
 
 
 if __name__ == "__main__":
