@@ -1,16 +1,18 @@
 # CodingJobBoard Auto-Apply
 
-A self-contained pipeline that finds remote software-engineering leads on
-[CodingJobBoard](https://www.codingjobboard.com), then applies to them for you by driving a real
-Chrome browser: opening each job's off-site ATS application (Greenhouse/Lever/Workday/etc.),
-triggering the [Simplify](https://simplify.jobs) browser extension's autofill, filling in
-whatever Simplify leaves blank from your own `profile.md`, and clicking the final Apply/Submit
-button.
+A self-contained pipeline that finds remote Java leads you're eligible for, from three sources —
+[CodingJobBoard](https://www.codingjobboard.com), companies' own Greenhouse/Lever/Ashby job boards,
+and [Himalayas](https://himalayas.app) — then applies to them for you by driving a real Chrome
+browser: opening each job's ATS application (Greenhouse/Lever/Workday/etc.), triggering the
+[Simplify](https://simplify.jobs) browser extension's autofill, filling in whatever Simplify leaves
+blank from your own `profile.md`, and clicking the final Apply/Submit button — or, in fill-only
+mode, stopping right before it so you review and submit.
 
 ## Read this before running it
 
-**This flow submits real applications with no human "yes."** There is no review step, no
-confirmation prompt — once it decides a job's form is complete, it clicks Submit itself. This is
+**By default this flow submits real applications with no human "yes."** There is no review step,
+no confirmation prompt — once it decides a job's form is complete, it clicks Submit itself. (Run
+`/apply-codingjobboard fill-only` to keep the final click for yourself — see step 4.) This is
 a deliberate design choice (it was extracted from a larger pipeline where it's the one flow built
 to work this way), not a default you should expect from automation in general. Only run it if
 you're comfortable with that.
@@ -35,9 +37,12 @@ to a submit — that job's browser tab is left open for you to finish by hand.
    again and use "Reconnect extension." See [Troubleshooting](#troubleshooting) for both cases.
 3. **[Simplify's Chrome extension](https://simplify.jobs/)** — install it from the Chrome Web
    Store if you don't have it, enable it, sign in, and fill in your resume/profile on Simplify's
-   own site. This flow relies entirely on Simplify's stored resume/autofill data — it never
-   generates or uploads a tailored CV itself, so nothing here works without Simplify actually
-   signed in and populated.
+   own site. The default (auto-submit) flow relies entirely on Simplify's stored resume/autofill
+   data and stops if Simplify isn't available. Fill-only mode can work without Simplify: it fills
+   forms from `profile.md` and uploads `cv/Yuri's CV.pdf`, a generic CV you put there yourself
+   (`cv/` is gitignored). Note: the Claude in Chrome tab group can open in an incognito or hidden
+   window, where Simplify is signed out or its panel doesn't render; allow Simplify in incognito,
+   or bring the Claude window to the front.
 4. **Python 3.10+**, with:
    ```bash
    pip install -r requirements.txt
@@ -305,14 +310,17 @@ to.
 
 Two local JSON files, no external vault or database:
 
-- **`found_jobs.json`** — every lead that passed `fetch_jobs.py`'s citizenship screen, keyed by id
-  (`codingjobboard-<numeric-id>`). Each entry carries a `fitVerdict: {status: "passed", reason}`
+- **`found_jobs.json`** — every lead that passed a fetcher's citizenship screen, keyed by id
+  (`codingjobboard-<numeric-id>`, `greenhouse-<company>-<id>`, `lever-…`, `ashby-…`,
+  `himalayas-<company>-<job slug>`); leads from the company-board and Himalayas fetchers also carry
+  an `applyUrl` pointing at the ATS form itself. Each entry carries a `fitVerdict: {status: "passed", reason}`
   field recording why it was kept. Re-running the fetcher updates a job in place if its posting
   text changed (re-screening it in the process), and leaves everything else alone. Postings
   screened out (`excluded`/`ambiguous`) never appear here at all — they're only ever printed to
   the console at fetch time.
 - **`applied_log.json`** — one entry per job once the apply agent has processed it: `applied`,
-  `needs_manual_review`, or `closed` (job no longer accepting applications), each with a
+  `ready_to_submit` (fill-only: filled, waiting for your click), `needs_manual_review`, `closed`
+  (job no longer accepting applications), `skipped_not_java`, or `rejected`, each with a
   timestamp and a note. A job with any entry here is treated as already handled and skipped by
   both the fetcher and the apply agent.
 
