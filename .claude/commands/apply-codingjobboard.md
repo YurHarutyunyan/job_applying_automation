@@ -17,7 +17,8 @@ itself. That is a deliberate design choice for this flow, not something to assum
 
 It works off leads already staged in `found_jobs.json` by `scripts/fetch_jobs.py` and
 `scripts/fetch_ats_jobs.py` — it doesn't
-search or filter jobs itself, and it doesn't tailor a CV (Simplify uses its own stored resume).
+search or filter jobs itself. It does tailor a CV per job (`scripts/tailor_cv_for_job.py`) and
+uploads it in place of Simplify's stored resume.
 
 $ARGUMENTS
 

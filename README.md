@@ -37,13 +37,17 @@ to a submit — that job's browser tab is left open for you to finish by hand.
    again and use "Reconnect extension." See [Troubleshooting](#troubleshooting) for both cases.
 3. **[Simplify's Chrome extension](https://simplify.jobs/)** — install it from the Chrome Web
    Store if you don't have it, enable it, sign in, and fill in your resume/profile on Simplify's
-   own site. The default (auto-submit) flow relies entirely on Simplify's stored resume/autofill
-   data and stops if Simplify isn't available. Fill-only mode can work without Simplify: it fills
-   forms from `profile.md` and uploads `cv/Yuri's CV.pdf`, a generic CV you put there yourself
-   (`cv/` is gitignored). Note: the Claude in Chrome tab group can open in an incognito or hidden
-   window, where Simplify is signed out or its panel doesn't render; allow Simplify in incognito,
-   or bring the Claude window to the front.
-4. **Python 3.10+**, with:
+   own site. Simplify fills every form first; the agent only fills what it leaves blank (and, in
+   fill-only mode, hand-fills sites Simplify doesn't support). Before the first job the agent
+   checks that the Claude in Chrome window is a normal (not incognito), visible window with
+   Simplify signed in — the tab group can open incognito or minimized, where Simplify is signed out
+   or doesn't render — and stops the run with the reason if not.
+5. **The full pipeline's `scripts/tailor_cv.py`** one directory up (override with
+   `TAILOR_CV_SCRIPT`). Every application gets a CV tailored to that job:
+   `scripts/tailor_cv_for_job.py --job-id <id>` writes `cv/tailored/<company>_<title>_<id>.{md,pdf}`
+   and stages the copy actually uploaded as `cv/upload/<id>/Yuri's CV.pdf`, replacing Simplify's
+   stored resume on the form. `cv/` is gitignored.
+6. **Python 3.10+**, with:
    ```bash
    pip install -r requirements.txt
    playwright install chromium
@@ -273,9 +277,9 @@ To have it fill every form but leave the final Submit click to you:
 ```
 /apply-codingjobboard fill-only
 ```
-Each job is logged `ready_to_submit` with its tab left open. If Simplify isn't signed in, the agent
-fills the form by hand from `profile.md` and uploads `cv/Yuri's CV.pdf` (a generic CV you put
-there; `cv/` is gitignored). After you submit a tab, log it as `applied` (step 5).
+Each job is logged `ready_to_submit` with its tab left open, its form filled by Simplify plus the
+agent and carrying that job's tailored CV. Only if Simplify doesn't support a site does the agent
+hand-fill it (and says so in the log note). After you submit a tab, log it as `applied` (step 5).
 
 To limit a run to one specific lead instead of everything pending:
 ```
@@ -388,6 +392,7 @@ scripts/
   fetch_himalayas_jobs.py     # Himalayas Java jobs open to Armenia, resolved to company ATS forms
   pending_jobs.py             # compact list of leads still to apply to (what the agent reads)
   log_apply.py                # records one job's outcome into applied_log.json
+  tailor_cv_for_job.py        # tailors a CV to one job, stages cv/upload/<id>/Yuri's CV.pdf
 .claude/
   agents/codingjobboard-apply-agent.md   # the agent that actually drives the browser and applies
   commands/apply-codingjobboard.md       # /apply-codingjobboard — launches the agent above

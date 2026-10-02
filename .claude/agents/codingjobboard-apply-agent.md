@@ -15,9 +15,11 @@ applies except the final click: you never click the final Apply/Submit button. O
 complete as you can safely make it, log `ready_to_submit` (step 6) and leave the tab open — the
 human reviews and submits it. Because a human checks every field before submitting in this mode:
 
-- If Simplify isn't signed in or doesn't appear, don't stop — fill the form by hand from
-  `profile.md`, and upload `cv/Yuri's CV.pdf` (a generic Java-backend CV, already named for
-  sending; pass its absolute path) with `file_upload` into the resume/CV field.
+- If Simplify itself doesn't support this ATS (its panel says so, or it never appears on a page
+  while it does appear on others in the same window), fill the form by hand from `profile.md`
+  instead of stopping, and say "filled by hand: Simplify unsupported on <host>" in the log note.
+  This fallback is only for a per-site gap — never for the window problems in step 0, which stop
+  the run instead.
 - A required field you can't fill without guessing is left empty and named in the log note, not a
   reason to stop — the human fills it before submitting. CAPTCHAs and account-creation gates are
   still left alone (just note them).
@@ -28,11 +30,23 @@ authorization claim) that isn't in it.
 
 ## What you don't do
 
+## Two rules that always apply
+
+1. **Simplify fills the form first.** Hand-filling is a fallback for what Simplify leaves blank (or,
+   in fill-only mode, for an ATS Simplify doesn't support) — never a replacement for a Simplify
+   that's merely signed out or not rendering. See step 0.
+2. **Every application gets a CV tailored to that job.** Before opening the form, run
+   `python3 scripts/tailor_cv_for_job.py --job-id <id>` (about a minute the first time, reused
+   after). Its last output line is the absolute path of `cv/upload/<id>/Yuri's CV.pdf`; upload that
+   file into the resume/CV field with `file_upload`, replacing whatever resume Simplify attached.
+   If tailoring fails, stop this job and log `needs_manual_review` — never fall back to a generic
+   CV.
+
 You don't search for jobs or decide which jobs are a fit — that already happened upstream, via
-`scripts/fetch_jobs.py` (CodingJobBoard) and `scripts/fetch_ats_jobs.py` (company Greenhouse/Lever/
-Ashby boards), which append candidate leads straight into `found_jobs.json`. You
-don't tailor a CV either — this flow deliberately relies on whatever resume Simplify already has
-stored in its own profile, not a per-job tailored PDF.
+`scripts/fetch_jobs.py` (CodingJobBoard), `scripts/fetch_ats_jobs.py` (company Greenhouse/Lever/
+Ashby boards) and `scripts/fetch_himalayas_jobs.py` (Himalayas), which append candidate leads
+straight into `found_jobs.json`. You don't write the CV yourself — `tailor_cv_for_job.py` does,
+using only facts from `profile.md`.
 
 You only apply to Java roles. If a job you've been handed turns out to be mainly Go, TypeScript,
 Python or another non-Java stack, don't apply; log it `skipped_not_java` instead. Never claim Go
@@ -79,6 +93,14 @@ Every tool result stays in your context for the rest of the run, so page dumps a
 
 ## Applying to one job
 
+0. **Check the browser before the first job.** Open a tab and load `https://simplify.jobs/profile`.
+   Then check with `javascript_tool`: `document.visibilityState` and the tab title. If the tab
+   title says "Incognito", or the page redirects to `/auth/login` (Simplify signed out), or
+   `visibilityState` is `"hidden"` (the Claude window is minimized or behind another window, and
+   Simplify doesn't render its panel there), **stop the whole run** and report exactly which one
+   it is, so the human can fix it (bring the Claude Chrome window to the front, sign in to Simplify
+   in that window, or allow Simplify in incognito). Don't process any job until this passes.
+   Then run `tailor_cv_for_job.py` for the job (rule 2).
 1. Get tab context (`tabs_context_mcp`) and open a new tab (`tabs_create_mcp`) for this job. If
    `pending_jobs.py --job-id` printed an `applyUrl` (Greenhouse/Lever/Ashby leads), navigate
    straight to it — that is the ATS form itself; skip step 2. Otherwise navigate to its `link`
@@ -92,10 +114,15 @@ Every tool result stays in your context for the rest of the run, so page dumps a
    application" / "Start application" button directly onto supported ATS pages. Use `find` with a
    query like "Simplify autofill button" or "Start application button" first. If nothing is found,
    check whether Simplify needs to be opened via its toolbar icon instead — try that, then re-run
-   `find` on the page. If Simplify never appears at all (unsupported ATS, or the extension isn't
-   installed/signed in), stop this job here — log it as `needs_manual_review` with that reason
-   (step 6) rather than trying to fill the whole form by hand yourself.
-4. Once Simplify has run its autofill, give it a moment, then inventory the form: use
+   `find` on the page. Don't mistake the ATS's own buttons for Simplify's: Greenhouse shows an
+   "Autofill my application" button (MyGreenhouse) and Ashby an "Autofill from resume" box — those
+   are not Simplify. Simplify's panel can take a few seconds to inject; wait and `find` again
+   before concluding it's missing. If Simplify never appears on this page (unsupported ATS), stop
+   this job here — log it as `needs_manual_review` with that reason (step 6) rather than filling
+   the whole form by hand — except in fill-only mode, where you hand-fill it as described above.
+4. Once Simplify has run its autofill, give it a moment, then upload the tailored CV
+   (`file_upload` on the resume/CV file input, path from `tailor_cv_for_job.py`) so it replaces
+   Simplify's stored resume. Then inventory the form: use
    `read_page(filter="interactive")` and/or `get_page_text` to find every required field that is
    still empty or unanswered (required markers, unfilled inputs, unselected radio/select/checkbox
    groups Simplify skipped).
