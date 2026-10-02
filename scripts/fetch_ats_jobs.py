@@ -47,7 +47,7 @@ COMPANIES_FILE = ROOT / "ats_companies.json"
 DEFAULT_LIMIT = 20
 TAG_RE = re.compile(r"<[^>]+>")
 REMOTE_RE = re.compile(r"\b(remote|anywhere|worldwide|distributed)\b", re.I)
-OPEN_REGION_RE = re.compile(r"\b(emea|europe|eu|asia|apac|global|anywhere|worldwide|armenia|international)\b", re.I)
+OPEN_REGION_RE = re.compile(r"\b(emea|europe|eu|asia|apac|global|anywhere|world ?wide|armenia|international)\b", re.I)
 NON_DEV_TITLE_RE = re.compile(r"\b(qa|quality|test|tester|testing|release|support|sales|solutions? architect)\b", re.I)
 CLOSED_REGION_RE = re.compile(
     r"(?i:\b(us|usa|u\.s\.|united states|canada|brazil|brasil|india|mexico|latam|australia|japan|uk|"
@@ -133,7 +133,16 @@ def ashby(slug: str) -> list[dict]:
 SOURCES = {"greenhouse": greenhouse, "lever": lever, "ashby": ashby}
 
 
+# "Remote - Bulgaria", "Remote (Canada)", "Remote: Georgia" — remote, but scoped to one place.
+REMOTE_SCOPED_RE = re.compile(r"\bremote\s*(?:-+|–|:|,|\()\s*([^;)]+)", re.I)
+
+
 def region_closed(location: str) -> bool:
+    if re.search(r"\barmenia\b", location, re.I):
+        return False
+    scoped = [m.group(1) for m in REMOTE_SCOPED_RE.finditer(location)]
+    if scoped and not any(OPEN_REGION_RE.search(x) for x in scoped):
+        return True
     return bool(CLOSED_REGION_RE.search(location)) and not OPEN_REGION_RE.search(location)
 
 
