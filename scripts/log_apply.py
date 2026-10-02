@@ -16,7 +16,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from common import load_jobs, select_job, record  # noqa: E402
 
-STATUSES = ("applied", "needs_manual_review", "closed", "skipped_no_cv", "skipped_not_java")
+STATUSES = ("applied", "needs_manual_review", "closed", "skipped_no_cv", "skipped_not_java", "rejected")
 
 
 def main():

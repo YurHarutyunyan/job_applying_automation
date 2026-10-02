@@ -254,7 +254,8 @@ Each such job has its browser tab left open on purpose. Go through them one at a
 python3 scripts/log_apply.py --job-id codingjobboard-14176 --status applied --note "finished manually — Simplify didn't support Workday"
 ```
 
-Valid `--status` values: `applied`, `needs_manual_review`, `closed`, `skipped_no_cv`.
+Valid `--status` values: `applied`, `needs_manual_review`, `closed`, `skipped_no_cv`,
+`skipped_not_java`, `rejected` (the employer turned down a submitted application).
 
 ### 6. Repeat
 
